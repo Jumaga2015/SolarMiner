@@ -31,7 +31,7 @@ Network requeriments:
 Configuration:
   - Please edit config.h file with 
     .Your IFTTT applet name and APIKEYS https://ifttt.com/services/maker_webhooks/settings
-    .Your Antminer's S9 fixed IP´s
+    .Your Antminer's S9 fixed IPÂ´s
     .Your Antminer's power usage
  
 Compilation instructions
@@ -50,6 +50,9 @@ To do:
   - Realtime wallet monitoring. 
  
 Questions/Suggestions:  japeralsoler@gmail.com
+
+Telegram: https://t.me/joinchat/AB8sJw6BQtMC47_3JxDN4A
+
 BTC Donations accepted: 3PfsbcTPQvpDybyeZLWm7jbNavcbNoFyH4
  
  
