@@ -1,0 +1,2 @@
+gcc -c sun.c
+gcc -o solarminer solarminer.c sun.o -lm
