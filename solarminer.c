@@ -454,13 +454,10 @@ int main(){
       printf("\r\nSolar Miner by Jose Peral v1.0. Press CTRL+Z to STOP"); time(&t); printf(" - %s\r\n", ctime(&t));
       printf("Logging into: %s %s\r\n", logfile_name, rawfile_name);
       
-    /*char test = 0;
-      for(test = 30; test<50 ; test++){ printf("\x1b[%02dm%02d\x1b[0m", test, test); }*/
-
       printf("_____________________________________________________________________________________________________\r\n");
       printf("# Ambient conditions #\r\n");
-      printf("Sun: rise= "); printSunrise(2018, 1, 27, LATITUDE, LONGITUDE, LOCALOFFSET, DAYLIGHTSAVINGS); 
-      printf("| set=");      printSunset (2018, 1, 27, LATITUDE, LONGITUDE, LOCALOFFSET, DAYLIGHTSAVINGS); 
+      printf("Sun: rise= "); printSunrise(2019, 1, 27, LATITUDE, LONGITUDE, LOCALOFFSET, DAYLIGHTSAVINGS); 
+      printf("| set=");      printSunset (2019, 1, 27, LATITUDE, LONGITUDE, LOCALOFFSET, DAYLIGHTSAVINGS); 
       printf("\r\n\r\n");
       
       printf("_____________________________________________________________________________________________________\r\n");
