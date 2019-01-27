@@ -465,7 +465,7 @@ int main(){
       
       printf("_____________________________________________________________________________________________________\r\n");
       printf("# Power routing # \r\n");
-      printf("Inverter detected: %s, %s, %s, %s\r\n", solax_fields[74], solax_fields[75], solax_fields[1], solax_fields[2]);
+      printf("Inverter detected: %s, %s, %s, %s\r\n", solax_fields[76], solax_fields[77], solax_fields[1], solax_fields[2]);
       printf("\r\n"); 
       
       printf("PV1 (V="); if (pv1_voltage > MIN_PV_VOLTAGE) printf(COLOR_GREEN "%03d" COLOR_RESET, pv1_voltage);
