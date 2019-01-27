@@ -30,9 +30,9 @@ Network requeriments:
 
 Configuration:
   - Please edit config.h file with 
-    .Your IFTTT applet name and APIKEYS. https://ifttt.com/services/maker_webhooks/settings
-    .Your Antminer's S9 fixed IP´s.
-    .Your Antminer's power usage.
+    .Your IFTTT applet name and APIKEYS https://ifttt.com/services/maker_webhooks/settings
+    .Your Antminer's S9 fixed IP´s
+    .Your Antminer's power usage
  
 Compilation instructions
   - execute ./compile
