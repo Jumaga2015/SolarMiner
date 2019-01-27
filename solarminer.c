@@ -144,12 +144,14 @@ int main(){
       fwrite("\r\n", 1, 2, raw_file);
       fclose(raw_file);
 
+/*
      //Parser debugger      
      for(j=0; j<81; j++){
        if(solax_fields[j][0]!=0){      
          printf("%0d : %s\r\n", j, solax_fields[j]);
        }
      }
+*/
 
       // Array to integer values conversion
       pv1_current = atof(solax_fields[4]);
