@@ -1,8 +1,12 @@
 //
-// SolarMiner v1.0
+// SolarMiner v1.1
 //
 // by Jose Peral, japeralsoler@gmail.com
 // https://github.com/japeral/solarminer
+//
+// 2019-01-29 v1.1 release. Emoncms datalogger integration.
+//                          Solar Peak time/date
+//                          Started / duration timers
 //
 // 2019-01-27 v1.0 release. Inverter: Solax-Boost-X1 
 //                          Loads Control: Sonoff trought Webhooks+eWelink API calls
@@ -17,7 +21,7 @@
 #include <unistd.h>        // sleep()
 #include <time.h>          // usleep() duration in nanoseconds (check the man page #man time)
 #include "sun.h"           // Sunset an Sunrise functions
-#include "config.h"
+#include "config_jose.h"
 
 #include <string.h>
 
@@ -59,6 +63,7 @@ int load2_disengage_counter=0;
 time_t t;
 struct tm *info;
 time_t start_timer=0;
+time_t elapsed_timer=0;
 time_t solax_poll_timer=0;
 time_t display_timer=0;
 time_t loads_regulation_timer=0;
@@ -74,7 +79,7 @@ float pv1_current=0;
 int   pv2_voltage=0;
 float pv2_current=0;
 int   house_power=0;     
-int   loads_power=0;     
+int   miners_power=0;     
 float today_solar_kwh=0;
 
 // Miner variables
@@ -94,12 +99,17 @@ int no_event=0;
 int test;
 
 int main(){		
- 
-  start_timer = time(NULL); 
+
   system("clear");
+
   loads_regulation_state_machine = KILL_ALL_LOADS; // Sync with IFTTT status.
   
+  // Start time
+  char start_time[50];  
+  time(&start_timer); info=localtime(&start_timer); strftime(start_time,50,"%Y-%m-%d %H:%M:%S", info);
+  start_timer = time (NULL);   
 
+  // Logging files names preparation
   char logfile_name[50];
   char rawfile_name[50];  
   time(&t); info=localtime(&t); strftime(log_time,25,"%Y%m%d-%H%M%S", info);
@@ -111,7 +121,7 @@ int main(){
   unsigned int i, j;
 
   while(1){
-
+  
     usleep(500); // sleep for CPU saving
 
     //--------------------------------------------------------------------------
@@ -173,11 +183,11 @@ int main(){
       // Miners poll & power.
       switch(loads_regulation_state_machine){
       case DEFAULT:      
-      case LOAD_1_OFF_LOAD_2_OFF: loads_power = 0;                         
+      case LOAD_1_OFF_LOAD_2_OFF: miners_power = 0;                         
         break; 
-      case LOAD_1_ON_LOAD_2_OFF:  loads_power = LOAD1_POWER;    
+      case LOAD_1_ON_LOAD_2_OFF:  miners_power = LOAD1_POWER;    
         break;
-      case LOAD_1_ON_LOAD_2_ON:   loads_power = LOAD1_POWER + LOAD2_POWER; 
+      case LOAD_1_ON_LOAD_2_ON:   miners_power = LOAD1_POWER + LOAD2_POWER; 
         break;
       default:
         // No change in load power. 
@@ -283,14 +293,19 @@ int main(){
       }
 */
  
- 
- /*  // Debug event log.     
+      /*  // Debug event log.     
       time(&t); info=localtime(&t); strftime(log_time,25,"%Y/%m/%d-%H:%M:%S", info); 
       test=head_line+1; if(test>LOG_LINES){head_line=0; log_full=1;} no_event=0;
       snprintf(event[head_line], LINE_LEN, "[%s] - Data adquisition.\r\n", log_time);
       FILE *log_file; log_file=fopen(logfile_name,"a+"); fwrite(event[head_line], 1, strlen(event[head_line]), log_file); fclose(log_file);
       if (!no_event) head_line++; 
- */
+      */
+ 
+      // Emoncms logger data feed
+      char emoncms_apicall[200]={0};
+      snprintf(emoncms_apicall, 200, 
+      "curl --data \"node=solarminer&json={solar_pwr:%d,imported_pwr:%d,miners_pwr:%d,miners_mhs:%d}&apikey=%s\" \"http://localhost:1234/emoncms/input/post\"",solar_power,imported_power,miners_power,(miner201_hashrate+miner202_hashrate),READ_WRITE);
+      system(emoncms_apicall);
       
     }// end solax polling task
     //--------------------------------------------------------------------------
@@ -380,8 +395,10 @@ int main(){
       }// if
       
       // Write event[] into log_file
-      FILE *log_file; log_file=fopen(logfile_name,"a+"); fwrite(event[head_line], 1, strlen(event[head_line]), log_file); fclose(log_file);
-      if (!no_event) head_line++;  
+      if (!no_event){
+        FILE *log_file; log_file=fopen(logfile_name,"a+"); fwrite(event[head_line], 1, strlen(event[head_line]), log_file); fclose(log_file);      
+        head_line++; 
+      } 
            
     }// if loads_regulation_decrease_timer
     //--------------------------------------------------------------------------    
@@ -416,7 +433,8 @@ int main(){
         system(KILL_SYSTEM_MINER1);
         loads_regulation_state_machine = LOAD_1_OFF_LOAD_2_OFF;
         snprintf(event[head_line], LINE_LEN, "[%s] - Load 1 disengaged\r\n", log_time); 
-        load1_disengage_counter++;       
+        load1_disengage_counter++;
+        miner201_hashrate=0;       
         break;
         
       case KILL_LOAD_2:
@@ -424,6 +442,7 @@ int main(){
         loads_regulation_state_machine = LOAD_1_ON_LOAD_2_OFF;
         snprintf(event[head_line], LINE_LEN, "[%s] - Load 2 disengaged\r\n", log_time);
         load2_disengage_counter++;
+        miner202_hashrate=0;
         break;
   
       default:
@@ -434,12 +453,16 @@ int main(){
         system(KILL_SYSTEM_MINER1);
         system(KILL_SYSTEM_MINER2);
         loads_regulation_state_machine=LOAD_1_OFF_LOAD_2_OFF;
-        snprintf(event[head_line], LINE_LEN, "[%s] - Load 1 & 2 disengaged\r\n", log_time);        
+        snprintf(event[head_line], LINE_LEN, "[%s] - Load 1 & 2 disengaged\r\n", log_time);  
+        miner201_hashrate = 0;
+        miner202_hashrate = 0;      
         break;
       }// switch    
       
-      FILE *log_file; log_file=fopen(logfile_name,"a+"); fwrite(event[head_line], 1, strlen(event[head_line]), log_file); fclose(log_file);
-      if (!no_event) head_line++;
+      if (!no_event){
+        FILE *log_file; log_file=fopen(logfile_name,"a+"); fwrite(event[head_line], 1, strlen(event[head_line]), log_file); fclose(log_file);      
+        head_line++; 
+      }      
          
     }// if ifttt regulation task
     //--------------------------------------------------------------------------
@@ -447,19 +470,33 @@ int main(){
     //--------------------------------------------------------------------------
     // Refresh display task
     //
-    if( time(NULL) > (display_timer+5)){
+    if( time(NULL) > (display_timer+CONSOLE_DISPLAY_TIME)){
       display_timer=time(NULL);
     	  
       system("clear");
-      printf("\r\nSolar Miner by Jose Peral v1.0. Press CTRL+Z to STOP"); time(&t); printf(" - %s\r\n", ctime(&t));
-      printf("Logging into: %s %s\r\n", logfile_name, rawfile_name);
+      printf("\r\nSolar Miner by Jose Peral v1.0. Press CTRL+Z to STOP"); 
+
+      // Elapsed time            
+      elapsed_timer = time(NULL)-start_timer;
+      int remainder, forDays = elapsed_timer / 86400; remainder = elapsed_timer % 86400; int forHours = remainder / 3600;
+      remainder = elapsed_timer % 3600; int forMinutes = remainder / 60, forSeconds = remainder % 60;                   
+      printf(" Started:[%s]-[%dday %02d:%02d:%02d]\r\n", start_time, forDays, forHours, forMinutes, forSeconds);
       
       printf("_____________________________________________________________________________________________________\r\n");
       printf("# Ambient conditions #\r\n");
-      printf("Sun: rise= "); printSunrise(2019, 1, 27, LATITUDE, LONGITUDE, LOCALOFFSET, DAYLIGHTSAVINGS); 
-      printf("| set=");      printSunset (2019, 1, 27, LATITUDE, LONGITUDE, LOCALOFFSET, DAYLIGHTSAVINGS); 
-      printf("\r\n\r\n");
+      time_t now_timer; time(&now_timer); info=localtime(&now_timer);      
+      printf("Date: %02d/%02d/%02d, Location: %.04fN %.04fE, ", info->tm_year+1900, info->tm_mon+1, info->tm_mday, LATITUDE, LONGITUDE);
+      printf("Sunrise=");   printSunrise(info->tm_year+1900, info->tm_mon+1, info->tm_mday, LATITUDE, LONGITUDE, LOCALOFFSET, info->tm_isdst); 
+      printf(" | Sunset="); printSunset (info->tm_year+1900, info->tm_mon+1, info->tm_mday, LATITUDE, LONGITUDE, LOCALOFFSET, info->tm_isdst); 
+      float sunriseT = calculateSunrise(info->tm_year+1900, info->tm_mon+1, info->tm_mday, LATITUDE, LONGITUDE, LOCALOFFSET, info->tm_isdst);      
+      float sunsetT = calculateSunset(info->tm_year+1900, info->tm_mon+1, info->tm_mday, LATITUDE, LONGITUDE, LOCALOFFSET, info->tm_isdst);
+      printf(" | Sunshine=%fh\r\n", sunsetT-sunriseT);
       
+      double julianday = calcJD(info->tm_year+1900,info->tm_mon+1,info->tm_mday);
+      printf("JD=%.02f sunrise=%.02f sunset=%.02f\r\n", calcSunriseUTC(julianday, LATITUDE, LONGITUDE), calcSunsetUTC(julianday, LATITUDE, LONGITUDE));
+      
+      printf("\r\n");
+       
       printf("_____________________________________________________________________________________________________\r\n");
       printf("# Power routing # \r\n");
       printf("Inverter detected: %s, %s, %s, %s\r\n", solax_fields[76], solax_fields[77], solax_fields[1], solax_fields[2]);
@@ -486,8 +523,8 @@ int main(){
       printf("                         Total Power usage now (%05d W)\r\n", house_power);
       printf("                                                   |\r\n");
       printf("                                                   V\r\n");
-      printf("                                                   |----> House  (%05d W)\r\n", house_power - loads_power);
-      printf("                                                   \\----> Miners (%05d W)\r\n", loads_power);
+      printf("                                                   |----> House  (%05d W)\r\n", house_power - miners_power);
+      printf("                                                   \\----> Miners (%05d W)\r\n", miners_power);
       printf("                                                                   |--> ");
       if(miner201_awake==1) printf(COLOR_GREEN MINER1_IP COLOR_RESET);
       else                  printf(COLOR_RESET MINER1_IP);
@@ -501,7 +538,7 @@ int main(){
       
       printf("       Max solar peak ever seen since start = %04d W\r\n", max_solar_power);
       printf(" Max solar power before last load reduction = %04d W\r\n", max_solar_at_load_reduction); 
-      printf("\r\n");
+      //printf("\r\n");
  
                  
       // Regulation loop
@@ -512,7 +549,8 @@ int main(){
       printf("Engaged:Disengaged > Load 1 %d:%d | Load 2 %d:%d\r\n", 
       load1_engage_counter,load1_disengage_counter,load2_engage_counter,load2_disengage_counter);
 
-      printf("Loads regualtion State machine:");
+/*
+      printf("Loads regulation State machine:");
       switch(loads_regulation_state_machine){
       case DEFAULT:               printf("[DEFAULT"); break;
       case KILL_ALL_LOADS:        printf("[KILL_ALL_LOADS"); break;
@@ -525,11 +563,11 @@ int main(){
       case LOAD_1_ON_LOAD_2_ON:   printf("[LOAD_1="); printf(COLOR_GREEN "ON" COLOR_RESET); printf(" | LOAD_2="); printf(COLOR_GREEN "ON" COLOR_RESET); break;
       }
       printf("]\r\n");     
-
+*/
           
 
       // Events log
-      printf("\r\n");
+      //printf("\r\n");
       printf("_____________________________________________________________________________________________________\r\n");      
       printf("# Recent event log # \r\n");      
       int i;
