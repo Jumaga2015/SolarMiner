@@ -300,11 +300,16 @@ int main(){
       FILE *log_file; log_file=fopen(logfile_name,"a+"); fwrite(event[head_line], 1, strlen(event[head_line]), log_file); fclose(log_file);
       if (!no_event) head_line++; 
       */
+      
+      int miners_ghs;
+      miners_ghs = miner201_hashrate + miner202_hashrate; 
  
       // Emoncms logger data feed
-      char emoncms_apicall[200]={0};
-      snprintf(emoncms_apicall, 200, 
-      "curl --data \"node=solarminer&json={solar_pwr:%d,imported_pwr:%d,miners_pwr:%d,miners_mhs:%d}&apikey=%s\" \"http://localhost:1234/emoncms/input/post\"",solar_power,imported_power,miners_power,(miner201_hashrate+miner202_hashrate),READ_WRITE);
+      char emoncms_apicall[300]={0};
+      snprintf(emoncms_apicall, 300, 
+      "curl --data \"node=solarminer&json={solar_pwr:%d,imported_pwr:%d,miners_pwr:%d,miners_ghs:%d}&apikey=%s\" \"http://localhost:1234/emoncms/input/post\"",
+      solar_power,imported_power,miners_power,miners_ghs,READ_WRITE);
+//    printf(emoncms_apicall); printf("\r\n");
       system(emoncms_apicall);
       
     }// end solax polling task
