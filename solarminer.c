@@ -5,7 +5,8 @@
 // https://github.com/japeral/solarminer
 //
 //
-// 2019-03-05 v1.2 release. Fine frequency control pushing cgminer.conf file to Antminer.
+// 2019-03-07 v1.4          Added smoother averager for controlled variable 'Imported power'.
+// 2019-03-07 v1.3 release. Fine frequency control pushing cgminer.conf file to Antminer.
 //
 // 2019-01-29 v1.1 release. Emoncms datalogger integration.
 //                          Solar Peak time/date
@@ -24,7 +25,7 @@
 #include <unistd.h>        // sleep()
 #include <time.h>          // usleep() duration in nanoseconds (check the man page #man time)
 #include "sun.h"           // Sunset an Sunrise functions
-#include "config.h"
+#include "config_jose.h"
 
 #include <string.h>
 
@@ -76,7 +77,6 @@ time_t ifttt_post_timer=0;
 // Solax variables
 char  solax_fields[90][30] = {0};
 int   solar_power=0;
-int   imported_power=0;
 int   pv1_voltage=0;
 float pv1_current=0;
 int   pv2_voltage=0;
@@ -84,6 +84,19 @@ float pv2_current=0;
 int   house_power=0;     
 int   miners_power=0;     
 float today_solar_kwh=0;
+
+//int   imported_power=0;
+
+// Averaged Imported_power
+//const  int numReadings=10;                    // Number of average samples.
+#define NUM_READINGS  10
+int imported_power_now = 0;                     // Current raw sample
+int imported_power_readings[NUM_READINGS]={0};  // the readings from the analog input
+int imported_power_index = 0;                   // the index of the current reading
+int imported_power_total = 0;                   // the running total
+int imported_power_avg = 0;                     // the average
+//float fimported_power;
+
 
 // Miner variables
 char  miner_fields[90][30] = {0};
@@ -168,14 +181,23 @@ int main(){
      }
 */
 
+
       // Array to integer values conversion
       pv1_current = atof(solax_fields[4]);
       pv2_current = atof(solax_fields[5]);
       pv1_voltage = atoi(solax_fields[6]);
       pv2_voltage = atoi(solax_fields[7]);
       solar_power = atoi(solax_fields[10]);
-      imported_power = atoi(solax_fields[14]);
+      imported_power_now = atoi(solax_fields[14]);
       today_solar_kwh = atof(solax_fields[45]);
+
+      // Smooth Average of Imported_power
+      imported_power_total = imported_power_total - imported_power_readings[imported_power_index];    // Substract previous sample to total.
+      imported_power_readings[imported_power_index] = imported_power_now; imported_power_index++;     // Store actual reading in readings array
+      if(imported_power_index >= NUM_READINGS) imported_power_index = 0;                              // Rollback index
+      imported_power_total = imported_power_total + imported_power_now;
+      imported_power_avg = imported_power_total / NUM_READINGS;                                       // Use total total to calculate averaged value.
+      
 
       // Solar peak detection.
       if(solar_power > max_solar_power){
@@ -183,7 +205,7 @@ int main(){
       }
       
       // House power.
-      house_power = -1*(abs(imported_power) + solar_power);
+      house_power = -1*(abs(imported_power_now) + solar_power);
  
       // Miners poll & power.
       switch(loads_regulation_state_machine){
@@ -297,11 +319,11 @@ int main(){
       // Emoncms logger data feed
       char emoncms_apicall[300]={0};
       snprintf(emoncms_apicall, 300, 
-      "curl --data \"node=solarminer&json={solar_pwr:%d,imported_pwr:%d,miners_pwr:%d,"
+      "curl --data \"node=solarminer&json={solar_pwr:%d,imported_pwr:%d,imported_pwr_avg:%d,miners_pwr:%d,"
       M1_ALIAS"_201_"M1_UNITS":%.0f,"
       M2_ALIAS"_202_"M2_UNITS":%.0f,"
       M3_ALIAS"_203_"M3_UNITS":%.0f}&apikey=%s\" \""EMONCMS_SERVER"\"",
-      solar_power,imported_power,miners_power,miner201_hashrate,miner202_hashrate,miner203_hashrate,READ_WRITE);
+      solar_power,imported_power_now,imported_power_avg,miners_power,miner201_hashrate,miner202_hashrate,miner203_hashrate,READ_WRITE);
       //printf(emoncms_apicall); printf("\r\n");
       system(emoncms_apicall);
       
@@ -321,7 +343,7 @@ int main(){
                   
       // Increase Load
       //       -0W                -90W             
-      if( (imported_power > enabling_threshold) && (solar_power > MIN_SOLAR_POWER) ){
+      if( (imported_power_avg > enabling_threshold) && (solar_power > MIN_SOLAR_POWER) ){
       
         loads_regulation_period=M1_BOOT_TIME; //
                                         
@@ -330,61 +352,61 @@ int main(){
           loads_regulation_state_machine=ENGAGE_LOAD_1;
           loads_regulation_period=M1_BOOT_TIME;                   
           snprintf(event[head_line], LINE_LEN, 
-          "[%s] - Increase.1OFF/2OFF.solar_power=%d.imported_power=%d>enabling_threshold=%d.Engage 1.next loads_regulation_period=%d s\r\n",
-          log_time,solar_power,imported_power,enabling_threshold,loads_regulation_period);          
+          "[%s] - Increase.1OFF/2OFF.solar_power=%d.imported_power_avg=%d>enabling_threshold=%d.Engage 1.next loads_regulation_period=%d s\r\n",
+          log_time,solar_power,imported_power_avg,enabling_threshold,loads_regulation_period);          
           break;
         case LOAD_1_ON_LOAD_2_OFF:
           loads_regulation_state_machine=ENGAGE_LOAD_2;
           loads_regulation_period=M2_BOOT_TIME;                   
           snprintf(event[head_line], LINE_LEN, 
-          "[%s] - Increase.1ON/2OFF.solar_power=%d.imported_power=%d>enabling_threshold=%d.Engage 2.next loads_regulation_period=%d s\r\n",
-          log_time,solar_power,imported_power,enabling_threshold,loads_regulation_period);          
+          "[%s] - Increase.1ON/2OFF.solar_power=%d.imported_power_avg=%d>enabling_threshold=%d.Engage 2.next loads_regulation_period=%d s\r\n",
+          log_time,solar_power,imported_power_avg,enabling_threshold,loads_regulation_period);          
           break;
         default:
 //          snprintf(event[head_line], LINE_LEN, 
-//          "[%s] - Increase.DEFAULT.solar_power=%d.imported_power=%d>enabling_threshold=%d.No action.next loads_regulation_period=%d s\r\n",
-//          log_time,solar_power,imported_power,enabling_threshold,loads_regulation_period);
+//          "[%s] - Increase.DEFAULT.solar_power=%d.imported_power_avg=%d>enabling_threshold=%d.No action.next loads_regulation_period=%d s\r\n",
+//          log_time,solar_power,imported_power_avg,enabling_threshold,loads_regulation_period);
           no_event=1;
           break;        
         case LOAD_1_ON_LOAD_2_ON:       
 //          snprintf(event[head_line], LINE_LEN, 
-//          "[%s] - Increase.1ON/2ON.solar_power=%d.imported_power=%d>enabling_threshold=%d.No action.next loads_regulation_period=%d s\r\n",
-//          log_time,solar_power,imported_power,enabling_threshold,loads_regulation_period);      
+//          "[%s] - Increase.1ON/2ON.solar_power=%d.imported_power_avg=%d>enabling_threshold=%d.No action.next loads_regulation_period=%d s\r\n",
+//          log_time,solar_power,imported_power_avg,enabling_threshold,loads_regulation_period);      
           no_event=1;    
           break;
         }
       }
              // Reduce Load.
              //    -1000           -200
-      else if(imported_power <= killing_threshold){   
+      else if(imported_power_avg <= killing_threshold){   
       
         loads_regulation_period=REENGAGE_STABILIZATION_TIME;
         
         switch(loads_regulation_state_machine){
         default:
 //          snprintf(event[head_line], LINE_LEN,
-//          "[%s] - Decrease.DEFAULT.solar_power=%d.imported_power=%d>killing_threshold=%d.No action.next loads_regulation_period=%d s\r\n",
-//          log_time,solar_power,imported_power,killing_threshold,loads_regulation_period);
+//          "[%s] - Decrease.DEFAULT.solar_power=%d.imported_power_avg=%d>killing_threshold=%d.No action.next loads_regulation_period=%d s\r\n",
+//          log_time,solar_power,imported_power_avg,killing_threshold,loads_regulation_period);
           no_event=1;
           break;
         case LOAD_1_OFF_LOAD_2_OFF:
 //          snprintf(event[head_line], LINE_LEN,
-//          "[%s] - Decrease.1OFF/2OFF.solar_power=%d.imported_power=%d>killing_threshold=%d.No action.next loads_regulation_period=%d s\r\n",
-//          log_time,solar_power,imported_power,killing_threshold,loads_regulation_period);
+//          "[%s] - Decrease.1OFF/2OFF.solar_power=%d.imported_power_avg=%d>killing_threshold=%d.No action.next loads_regulation_period=%d s\r\n",
+//          log_time,solar_power,imported_power_avg,killing_threshold,loads_regulation_period);
           no_event=1;        
           break; 
         case LOAD_1_ON_LOAD_2_OFF:
           loads_regulation_state_machine=KILL_LOAD_1;
           snprintf(event[head_line], LINE_LEN, 
-          "[%s] - Decrease.1ON/2OFF.solar_power=%d.imported_power=%d>killing_threshold=%d.Kill 1.next loads_regulation_period=%d s\r\n",
-          log_time,solar_power,imported_power,killing_threshold,loads_regulation_period);
+          "[%s] - Decrease.1ON/2OFF.solar_power=%d.imported_power_avg=%d>killing_threshold=%d.Kill 1.next loads_regulation_period=%d s\r\n",
+          log_time,solar_power,imported_power_avg,killing_threshold,loads_regulation_period);
           max_solar_at_load_reduction = solar_power;
           break;
         case LOAD_1_ON_LOAD_2_ON:
           loads_regulation_state_machine=KILL_LOAD_2;        
           snprintf(event[head_line], LINE_LEN,
-          "[%s] - Decrease.1ON/2ON.solar_power=%d.imported_power=%d>killing_threshold=%d.Kill 2.next loads_regulation_period=%d s\r\n",
-          log_time,solar_power,imported_power,killing_threshold,loads_regulation_period);
+          "[%s] - Decrease.1ON/2ON.solar_power=%d.imported_power_avg=%d>killing_threshold=%d.Kill 2.next loads_regulation_period=%d s\r\n",
+          log_time,solar_power,imported_power_avg,killing_threshold,loads_regulation_period);
           max_solar_at_load_reduction = solar_power;
           break;      
         }//case                 
@@ -525,10 +547,10 @@ int main(){
       printf(         ",I=%2.1f)->-/         Today ( %03.1f KWh)     |\r\n", pv2_current, today_solar_kwh);
       printf("                                                   |\r\n");
       printf("Imported power (");
-      if     ( imported_power > 0 )                    printf(COLOR_MAGENTA"%05d W)  --<----<----<----<----<--|\r\n" COLOR_RESET, imported_power);
-      else if( imported_power > enabling_threshold )   printf(COLOR_GREEN  "%05d W)  -------------------------|\r\n" COLOR_RESET, imported_power);
-      else if( imported_power > killing_threshold)     printf(COLOR_CYAN   "%05d W)  -->---->---->---->---->--|\r\n" COLOR_RESET, imported_power);
-      else                                             printf(COLOR_RED    "%05d W)  ==>====>====>====>====>==|\r\n" COLOR_RESET, imported_power);
+      if     ( imported_power_avg > 0 )                    printf(COLOR_MAGENTA"%05d W)  --<----<----<----<----<--|\r\n" COLOR_RESET, imported_power_avg);
+      else if( imported_power_avg > enabling_threshold )   printf(COLOR_GREEN  "%05d W)  -------------------------|\r\n" COLOR_RESET, imported_power_avg);
+      else if( imported_power_avg > killing_threshold)     printf(COLOR_CYAN   "%05d W)  -->---->---->---->---->--|\r\n" COLOR_RESET, imported_power_avg);
+      else                                             printf(COLOR_RED    "%05d W)  ==>====>====>====>====>==|\r\n" COLOR_RESET, imported_power_avg);
 
       printf("                                                   V\r\n");
       printf("                                                   |\r\n");
