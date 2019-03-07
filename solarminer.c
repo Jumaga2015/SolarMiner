@@ -4,6 +4,9 @@
 // by Jose Peral, japeralsoler@gmail.com
 // https://github.com/japeral/solarminer
 //
+//
+// 2019-03-05 v1.2 release. Fine frequency control pushing cgminer.conf file to Antminer.
+//
 // 2019-01-29 v1.1 release. Emoncms datalogger integration.
 //                          Solar Peak time/date
 //                          Started / duration timers
@@ -21,7 +24,7 @@
 #include <unistd.h>        // sleep()
 #include <time.h>          // usleep() duration in nanoseconds (check the man page #man time)
 #include "sun.h"           // Sunset an Sunrise functions
-#include "config_jose.h"
+#include "config.h"
 
 #include <string.h>
 
@@ -86,8 +89,10 @@ float today_solar_kwh=0;
 char  miner_fields[90][30] = {0};
 float miner201_hashrate=0;
 float miner202_hashrate=0;
+float miner203_hashrate=0;
 unsigned char miner201_awake =0;
 unsigned char miner202_awake =0;
+unsigned char miner203_awake =0;
 
 // Event log variables
 char event[LOG_LINES][LINE_LEN] = {0};
@@ -205,12 +210,10 @@ int main(){
 //      printf("201_reacheable touched\r\n");      
 //      fclose(file); // Close ping file.
         miner201_awake = 1;
+        
+        system(M1_SYSTEM_PING);            // Ping bmminer                      
+        file=fopen(M1_PING_RES_PATH,"r");  // Miner 1 response parse
 
-        // Ping bmminer        
-        system(PING_SYSTEM_MINER1);
-
-        // Miner 1 response parse               
-        file=fopen(PING_RESPONSE_MINER1,"r");
         // Comma response parser    
         if (file > 0){ 
           for (j=0; j<72; j++){
@@ -244,23 +247,29 @@ int main(){
 */
    
       // Miner 2 polling
-      //system("ping -c 1 192.168.0.201 &> /dev/null && echo success || echo fail");
-//    system("rm /dev/shm/201_reacheable");
-//    system("ping -c 1 192.168.0.201 &> /dev/null && touch /dev/shm/201_reacheable || rm /dev/shm/201_reacheable");
-//    file=fopen("/dev/shm/201_reacheable","r");
-//    printf("miner1 file %d\r\n", file);
-//    if ( file<0 ){ // if ping success
+        miner202_awake = 1;              
+        system(M2_SYSTEM_PING);             // Ping bmminer
+        file=fopen(M2_PING_RES_PATH,"r");   // Miner 1 response parse
+        // Comma response parser    
+        if (file > 0){ 
+          for (j=0; j<72; j++){
+            for (i = 0; i < 30; ++i){
+              int c = getc(file);
+              if ( c == ',' || c == '='){
+                miner_fields[j][i] = 0;
+                break;
+              }
+              miner_fields[j][i] = c;
+            }
+          }
+          fclose(file);         
+          miner202_hashrate = atof(miner_fields[16]);       
+        }  
 
-//      printf("202_reacheable touched\r\n");      
-//      fclose(file); // Close ping file.
-        miner202_awake = 1;
-
-
-        // Ping bmminer        
-        system(PING_SYSTEM_MINER2);
-      
-        // Miner 1 response parse               
-        file=fopen(PING_RESPONSE_MINER2,"r");
+       // Miner 3 polling
+        miner203_awake = 1;       
+        system(M3_SYSTEM_PING);              // Ping bmminer               
+        file=fopen(M3_PING_RES_PATH,"r");    // Miner 3 response parse
         // Comma response parser    
         if (file > 0){ 
           for (j=0; j<72; j++){
@@ -274,24 +283,8 @@ int main(){
             }
           }
           fclose(file);
-            
-          //Parser debugger      
-          //for(j=0; j<16; j++){
-          //  if(miner_fields[j][0]!=0){      
-          //    printf("%0d : %s\r\n", j, miner_fields[j]);
-          //  }
-          //}
-          //usleep(2000);
-          
-          miner202_hashrate = atof(miner_fields[16]);       
-        }  
-/*      }else{
-          printf("201_reacheable removed\r\n");
-//        fclose(file); // Close ping file.
-          miner201_awake = 0;
-          miner201_hashrate = 0;
+          miner203_hashrate = atof(miner_fields[16]);       
       }
-*/
  
       /*  // Debug event log.     
       time(&t); info=localtime(&t); strftime(log_time,25,"%Y/%m/%d-%H:%M:%S", info); 
@@ -299,17 +292,17 @@ int main(){
       snprintf(event[head_line], LINE_LEN, "[%s] - Data adquisition.\r\n", log_time);
       FILE *log_file; log_file=fopen(logfile_name,"a+"); fwrite(event[head_line], 1, strlen(event[head_line]), log_file); fclose(log_file);
       if (!no_event) head_line++; 
-      */
-      
-      int miners_ghs;
-      miners_ghs = miner201_hashrate + miner202_hashrate; 
+      */     
  
       // Emoncms logger data feed
       char emoncms_apicall[300]={0};
       snprintf(emoncms_apicall, 300, 
-      "curl --data \"node=solarminer&json={solar_pwr:%d,imported_pwr:%d,miners_pwr:%d,miners_ghs:%d}&apikey=%s\" \"http://localhost:1234/emoncms/input/post\"",
-      solar_power,imported_power,miners_power,miners_ghs,READ_WRITE);
-//    printf(emoncms_apicall); printf("\r\n");
+      "curl --data \"node=solarminer&json={solar_pwr:%d,imported_pwr:%d,miners_pwr:%d,"
+      M1_ALIAS"_201_"M1_UNITS":%.0f,"
+      M2_ALIAS"_202_"M2_UNITS":%.0f,"
+      M3_ALIAS"_203_"M3_UNITS":%.0f}&apikey=%s\" \""EMONCMS_SERVER"\"",
+      solar_power,imported_power,miners_power,miner201_hashrate,miner202_hashrate,miner203_hashrate,READ_WRITE);
+      //printf(emoncms_apicall); printf("\r\n");
       system(emoncms_apicall);
       
     }// end solax polling task
@@ -327,22 +320,22 @@ int main(){
       test=head_line+1; if(test>LOG_LINES){head_line=0; log_full=1;} no_event=0;
                   
       // Increase Load
-      //    -0W                -90W            day mode, filter out short on 
-      if( (imported_power > enabling_threshold) && 
-          //( (pv1_voltage > MIN_PV_VOLTAGE) || (pv2_voltage > MIN_PV_VOLTAGE) ) ) ){  // potencia importada entre -90 y +inf
-          (solar_power > MIN_SOLAR_POWER) ){
+      //       -0W                -90W             
+      if( (imported_power > enabling_threshold) && (solar_power > MIN_SOLAR_POWER) ){
       
-        loads_regulation_period=MINER_BOOT_TIME; // 
-                                  
+        loads_regulation_period=M1_BOOT_TIME; //
+                                        
         switch(loads_regulation_state_machine){
         case LOAD_1_OFF_LOAD_2_OFF:
-          loads_regulation_state_machine=ENGAGE_LOAD_1;         
+          loads_regulation_state_machine=ENGAGE_LOAD_1;
+          loads_regulation_period=M1_BOOT_TIME;                   
           snprintf(event[head_line], LINE_LEN, 
           "[%s] - Increase.1OFF/2OFF.solar_power=%d.imported_power=%d>enabling_threshold=%d.Engage 1.next loads_regulation_period=%d s\r\n",
           log_time,solar_power,imported_power,enabling_threshold,loads_regulation_period);          
           break;
         case LOAD_1_ON_LOAD_2_OFF:
-          loads_regulation_state_machine=ENGAGE_LOAD_2;         
+          loads_regulation_state_machine=ENGAGE_LOAD_2;
+          loads_regulation_period=M2_BOOT_TIME;                   
           snprintf(event[head_line], LINE_LEN, 
           "[%s] - Increase.1ON/2OFF.solar_power=%d.imported_power=%d>enabling_threshold=%d.Engage 2.next loads_regulation_period=%d s\r\n",
           log_time,solar_power,imported_power,enabling_threshold,loads_regulation_period);          
@@ -416,26 +409,34 @@ int main(){
 
       time(&t); info=localtime(&t); strftime(log_time,25,"%Y/%m/%d-%H:%M:%S", info); 
       test=head_line+1; if(test>LOG_LINES){head_line=0; log_full=1;} no_event = 0;
-        
+
+      char ifttt_apicall[300]={0};
+              
       // Regulation outputs
       switch(loads_regulation_state_machine){
                    
-      case ENGAGE_LOAD_1:     
-        system(ENGAGE_SYSTEM_MINER1);
+      case ENGAGE_LOAD_1:   
+        snprintf(ifttt_apicall, 300, "curl -X POST "L1_URL_ENGAGE IFTTT_API_KEY);
+        //printf(ifttt_apicall); printf("\r\n");
+        system(ifttt_apicall);
         loads_regulation_state_machine = LOAD_1_ON_LOAD_2_OFF;
         snprintf(event[head_line], LINE_LEN, "[%s] - Load 1 engaged\r\n", log_time);          
         load1_engage_counter++;      
         break;
       
       case ENGAGE_LOAD_2:
-        system(ENGAGE_SYSTEM_MINER2);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_URL_ENGAGE IFTTT_API_KEY);
+        //printf(ifttt_apicall); printf("\r\n");
+        system(ifttt_apicall);
         loads_regulation_state_machine = LOAD_1_ON_LOAD_2_ON;
         snprintf(event[head_line], LINE_LEN, "[%s] - Load 2 engaged\r\n", log_time);
         load2_engage_counter++;    
         break;
           
       case KILL_LOAD_1:
-        system(KILL_SYSTEM_MINER1);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L1_URL_KILL IFTTT_API_KEY);
+        //printf(ifttt_apicall); printf("\r\n");
+        system(ifttt_apicall);
         loads_regulation_state_machine = LOAD_1_OFF_LOAD_2_OFF;
         snprintf(event[head_line], LINE_LEN, "[%s] - Load 1 disengaged\r\n", log_time); 
         load1_disengage_counter++;
@@ -443,7 +444,9 @@ int main(){
         break;
         
       case KILL_LOAD_2:
-        system(KILL_SYSTEM_MINER2);        
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_URL_KILL IFTTT_API_KEY);
+        //printf(ifttt_apicall); printf("\r\n");
+        system(ifttt_apicall);        
         loads_regulation_state_machine = LOAD_1_ON_LOAD_2_OFF;
         snprintf(event[head_line], LINE_LEN, "[%s] - Load 2 disengaged\r\n", log_time);
         load2_disengage_counter++;
@@ -455,8 +458,12 @@ int main(){
         break;
       
       case KILL_ALL_LOADS:
-        system(KILL_SYSTEM_MINER1);
-        system(KILL_SYSTEM_MINER2);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L1_URL_KILL IFTTT_API_KEY);
+        printf(ifttt_apicall); printf("\r\n");         
+        system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_URL_KILL IFTTT_API_KEY);
+        printf(ifttt_apicall); printf("\r\n");         
+        system(ifttt_apicall);
         loads_regulation_state_machine=LOAD_1_OFF_LOAD_2_OFF;
         snprintf(event[head_line], LINE_LEN, "[%s] - Load 1 & 2 disengaged\r\n", log_time);  
         miner201_hashrate = 0;
@@ -530,14 +537,22 @@ int main(){
       printf("                                                   V\r\n");
       printf("                                                   |----> House  (%05d W)\r\n", house_power - miners_power);
       printf("                                                   \\----> Miners (%05d W)\r\n", miners_power);
+
       printf("                                                                   |--> ");
-      if(miner201_awake==1) printf(COLOR_GREEN MINER1_IP COLOR_RESET);
-      else                  printf(COLOR_RESET MINER1_IP);
-      printf(": %02.2f GHS\r\n", miner201_hashrate);
+      if(miner201_awake==1) printf(M1_ALIAS COLOR_GREEN " " M1_IP COLOR_RESET);
+      else                  printf(COLOR_RESET M1_IP);
+      printf(": %02.2f ", miner201_hashrate); printf(M1_UNITS); printf("\r\n");
+      
+      printf("                                                                   |--> ");
+      if(miner202_awake==1) printf(M2_ALIAS COLOR_GREEN " " M2_IP COLOR_RESET);
+      else                  printf(COLOR_RESET M2_IP);
+      printf(": %02.2f ", miner202_hashrate); printf(M2_UNITS); printf("\r\n");
+      
       printf("                                                                   \\--> ");
-      if(miner202_awake==1) printf(COLOR_GREEN MINER2_IP COLOR_RESET);
-      else                  printf(COLOR_RESET MINER2_IP);
-      printf(": %02.2f GHS\r\n", miner202_hashrate);
+      if(miner203_awake==1) printf(M3_ALIAS COLOR_GREEN " " M3_IP COLOR_RESET);
+      else                  printf(COLOR_RESET M3_IP);
+      printf(": %02.2f ", miner203_hashrate); printf(M3_UNITS); printf("\r\n");
+      
  
       printf("\r\n");
       
