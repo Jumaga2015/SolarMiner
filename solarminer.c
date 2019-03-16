@@ -1,10 +1,10 @@
 //
-// SolarMiner v1.1
+// SolarMiner v1.5
 //
 // by Jose Peral, japeralsoler@gmail.com
 // https://github.com/japeral/solarminer
 //
-//
+// 2019-03-13 v1.5          Added Fine frequency regulation for Load 1, Load 2 is fixed.
 // 2019-03-07 v1.4          Added smoother averager for controlled variable 'Imported power'.
 // 2019-03-07 v1.3 release. Fine frequency control pushing cgminer.conf file to Antminer.
 //
@@ -44,17 +44,53 @@ int   enabling_threshold = SOLAX_REGULATION_THRESHOLD;  // W
 int max_solar_power = 0;
 int max_solar_at_load_reduction = 0;
 
-// SOLAX STATE machine
+// ON/OFF Regulation STATE machine.
+/* 
 enum{
   DEFAULT = 0,
-  KILL_ALL_LOADS,
-  LOAD_1_OFF_LOAD_2_OFF,
-  ENGAGE_LOAD_1,
-  LOAD_1_ON_LOAD_2_OFF,
-  ENGAGE_LOAD_2,
-  LOAD_1_ON_LOAD_2_ON, 
-  KILL_LOAD_1,
-  KILL_LOAD_2  
+  KILL_ALL_LS,
+  L_1_OFF_L_2_OFF,
+  ENGAGE_L_1,
+  L_1_ON_L_2_OFF,
+  ENGAGE_L_2,
+  L_1_ON_L_2_ON, 
+  KILL_L_1,
+  KILL_L_2  
+};*/
+
+// 4 FREQUENCY STEPS for Load 1, FIXED for Load 2, Regulation STATE machine. 
+// 
+enum{
+  DEFAULT = 0,
+  SET_L1_OFF_L2_OFF,
+      L1_OFF_L2_OFF,
+        
+  SET_L1_ON__L2_OFF,   
+      L1_ON__L2_OFF,
+      
+  SET_L1_ST1_L2_OFF,
+      L1_ST1_L2_OFF,
+  SET_L1_ST2_L2_OFF,
+      L1_ST2_L2_OFF,
+  SET_L1_ST3_L2_OFF,
+      L1_ST3_L2_OFF,
+  SET_L1_ST4_L2_OFF,
+      L1_ST4_L2_OFF,
+      
+  SET_L1_OFF_L2_ON,
+      L1_OFF_L2_ON,
+      
+  SET_L1_ON__L2_ON,
+      L1_ON__L2_ON,
+      
+  SET_L1_ST1_L2_ON,
+      L1_ST1_L2_ON,
+  SET_L1_ST2_L2_ON,
+      L1_ST2_L2_ON,
+  SET_L1_ST3_L2_ON,
+      L1_ST3_L2_ON,
+  SET_L1_ST4_L2_ON,
+      L1_ST4_L2_ON
 };
 int loads_regulation_state_machine;
 
@@ -71,7 +107,7 @@ time_t elapsed_timer=0;
 time_t solax_poll_timer=0;
 time_t display_timer=0;
 time_t loads_regulation_timer=0;
-time_t loads_regulation_period=5;
+time_t loads_regulation_period=ALL_ONOFF_TIME;
 time_t ifttt_post_timer=0;
 
 // Solax variables
@@ -83,18 +119,18 @@ int   pv2_voltage=0;
 float pv2_current=0;
 int   house_power=0;     
 int   miners_power=0;     
-float today_solar_kwh=0;
+float solar_kwh_today=0;
+float solar_kwh_total=0;
 
 //int   imported_power=0;
 
 // Averaged Imported_power
 //const  int numReadings=10;                    // Number of average samples.
-#define NUM_READINGS  10
-int imported_power_now = 0;                     // Current raw sample
-int imported_power_readings[NUM_READINGS]={0};  // the readings from the analog input
-int imported_power_index = 0;                   // the index of the current reading
-int imported_power_total = 0;                   // the running total
-int imported_power_avg = 0;                     // the average
+long imported_power_now = 0;                     // Current raw sample
+long imported_power_readings[NUM_READINGS]={0};  // the readings from the analog input
+long imported_power_index = 0;                   // the index of the current reading
+long imported_power_total = 0;                   // the running total
+long imported_power_avg = 0;                     // the average
 //float fimported_power;
 
 
@@ -120,7 +156,7 @@ int main(){
 
   system("clear");
 
-  loads_regulation_state_machine = KILL_ALL_LOADS; // Sync with IFTTT status.
+  loads_regulation_state_machine = SET_L1_OFF_L2_OFF; // Sync with IFTTT status.
   
   // Start time
   char start_time[50];  
@@ -189,7 +225,8 @@ int main(){
       pv2_voltage = atoi(solax_fields[7]);
       solar_power = atoi(solax_fields[10]);
       imported_power_now = atoi(solax_fields[14]);
-      today_solar_kwh = atof(solax_fields[45]);
+      solar_kwh_today = atof(solax_fields[45]);
+      solar_kwh_total = atof(solax_fields[46]);
 
       // Smooth Average of Imported_power
       imported_power_total = imported_power_total - imported_power_readings[imported_power_index];    // Substract previous sample to total.
@@ -208,18 +245,42 @@ int main(){
       house_power = -1*(abs(imported_power_now) + solar_power);
  
       // Miners poll & power.
+      /*
       switch(loads_regulation_state_machine){
       case DEFAULT:      
-      case LOAD_1_OFF_LOAD_2_OFF: miners_power = 0;                         
+      case L_1_OFF_L_2_OFF: miners_power = 0;                         
         break; 
-      case LOAD_1_ON_LOAD_2_OFF:  miners_power = LOAD1_POWER;    
+      case L_1_ON_L_2_OFF:  miners_power = L1_POWER;    
         break;
-      case LOAD_1_ON_LOAD_2_ON:   miners_power = LOAD1_POWER + LOAD2_POWER; 
+      case L_1_ON_L_2_ON:   miners_power = L1_POWER + L2_POWER; 
         break;
+
       default:
         // No change in load power. 
         break; 
-      }//switch
+      }//switch */
+      
+
+      switch(loads_regulation_state_machine){
+      case DEFAULT:      
+      case L1_OFF_L2_OFF: miners_power = 0;                       break;
+      case L1_ON__L2_OFF: miners_power = L1_POWER;                break;
+      case L1_ST1_L2_OFF: miners_power = L1_ST1_POWER;            break;
+      case L1_ST2_L2_OFF: miners_power = L1_ST2_POWER;            break;
+      case L1_ST3_L2_OFF: miners_power = L1_ST3_POWER;            break;
+      case L1_ST4_L2_OFF: miners_power = L1_ST4_POWER;            break;
+      case L1_OFF_L2_ON:  miners_power =                L2_POWER; break; 
+      case L1_ON__L2_ON:  miners_power = L1_POWER     + L2_POWER; break;
+      case L1_ST1_L2_ON:  miners_power = L1_ST1_POWER + L2_POWER; break; 
+      case L1_ST2_L2_ON:  miners_power = L1_ST2_POWER + L2_POWER; break;  
+      case L1_ST3_L2_ON:  miners_power = L1_ST3_POWER + L2_POWER; break; 
+      case L1_ST4_L2_ON:  miners_power = L1_ST4_POWER + L2_POWER; break;  
+      default:
+        // No change in load power. 
+        break; 
+      }//switch */
+
+
 
       // Miner 1 polling
       //system("ping -c 1 192.168.0.201 &> /dev/null && echo success || echo fail");
@@ -340,23 +401,26 @@ int main(){
       
       time(&t); info=localtime(&t); strftime(log_time,25,"%Y/%m/%d-%H:%M:%S", info); 
       test=head_line+1; if(test>LOG_LINES){head_line=0; log_full=1;} no_event=0;
-                  
+      
+      /*            
       // Increase Load
       //       -0W                -90W             
       if( (imported_power_avg > enabling_threshold) && (solar_power > MIN_SOLAR_POWER) ){
-      
-        loads_regulation_period=M1_BOOT_TIME; //
-                                        
+
+        //loads_regulation_period=M1_BOOT_TIME; //
+                                   
         switch(loads_regulation_state_machine){
-        case LOAD_1_OFF_LOAD_2_OFF:
-          loads_regulation_state_machine=ENGAGE_LOAD_1;
+        case L_1_OFF_L_2_OFF:
+          loads_regulation_period=M1_BOOT_TIME; //
+          loads_regulation_state_machine=ENGAGE_L_1;
           loads_regulation_period=M1_BOOT_TIME;                   
           snprintf(event[head_line], LINE_LEN, 
           "[%s] - Increase.1OFF/2OFF.solar_power=%d.imported_power_avg=%d>enabling_threshold=%d.Engage 1.next loads_regulation_period=%d s\r\n",
           log_time,solar_power,imported_power_avg,enabling_threshold,loads_regulation_period);          
           break;
-        case LOAD_1_ON_LOAD_2_OFF:
-          loads_regulation_state_machine=ENGAGE_LOAD_2;
+        case L_1_ON_L_2_OFF:
+          loads_regulation_period=M1_BOOT_TIME; //
+          loads_regulation_state_machine=ENGAGE_L_2;
           loads_regulation_period=M2_BOOT_TIME;                   
           snprintf(event[head_line], LINE_LEN, 
           "[%s] - Increase.1ON/2OFF.solar_power=%d.imported_power_avg=%d>enabling_threshold=%d.Engage 2.next loads_regulation_period=%d s\r\n",
@@ -368,19 +432,110 @@ int main(){
 //          log_time,solar_power,imported_power_avg,enabling_threshold,loads_regulation_period);
           no_event=1;
           break;        
-        case LOAD_1_ON_LOAD_2_ON:       
+        case L_1_ON_L_2_ON:
+            loads_regulation_period=ALL_ONOFF_TIME; //       
 //          snprintf(event[head_line], LINE_LEN, 
 //          "[%s] - Increase.1ON/2ON.solar_power=%d.imported_power_avg=%d>enabling_threshold=%d.No action.next loads_regulation_period=%d s\r\n",
 //          log_time,solar_power,imported_power_avg,enabling_threshold,loads_regulation_period);      
           no_event=1;    
           break;
         }
+      }*/
+
+                 
+      // Increase Load
+      //       -0W                -90W             
+      if( (imported_power_avg > enabling_threshold) && (solar_power > MIN_SOLAR_POWER) ){
+                                   
+        switch(loads_regulation_state_machine){
+        
+// All OFF. 
+        case L1_OFF_L2_OFF:
+          loads_regulation_state_machine=SET_L1_ON__L2_OFF,
+          loads_regulation_period=L1_BOOT_TIME; //            
+          snprintf(event[head_line], LINE_LEN, "[%s] - (INC) L1_OFF_L2_OFF -> SET_L1_ON__L2_OFF\r\n", log_time);
+          break;
+
+// Miner 1 ON, and wait for SSH interface to be ready.
+        case L1_ON__L2_OFF:  
+          loads_regulation_state_machine=SET_L1_ST1_L2_OFF,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN, "[%s] - (INC) L1_ON__L2_OFF -> SET_L1_ST1_L2_OFF\r\n", log_time);          
+          break;
+ 
+ // Load 1, 4 steps       
+        case L1_ST1_L2_OFF:  // Change to STEP 1 frequency
+          loads_regulation_state_machine=SET_L1_ST2_L2_OFF,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN, "[%s] - (INC) L1_ST1_L2_OFF -> SET_L1_ST2_L2_OFF\r\n", log_time);          
+          break;
+
+        case L1_ST2_L2_OFF:  // Change to STEP 2 frequency
+          loads_regulation_state_machine=SET_L1_ST3_L2_OFF,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN, "[%s] - (INC) L1_ST2_L2_OFF -> SET_L1_ST3_L2_OFF\r\n", log_time);          
+          break;
+
+        case L1_ST3_L2_OFF:  // Change to STEP 3 frequency
+          loads_regulation_state_machine=SET_L1_ST4_L2_OFF,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN, "[%s] - (INC) L1_ST3_L2_OFF -> SET_L1_ST4_L2_OFF\r\n", log_time);          
+          break;
+
+        case L1_ST4_L2_OFF:  // Change to STEP 4 frequency
+          loads_regulation_state_machine=SET_L1_OFF_L2_ON,
+          loads_regulation_period=L2_BOOT_TIME; //            
+          snprintf(event[head_line], LINE_LEN, "[%s] - (INC) L1_ST4_L2_OFF -> SET_L1_OFF_L2_ON\r\n", log_time);          
+          break;
+
+// Miner 1 OFF, Miner 2 ON.
+        case L1_OFF_L2_ON:    
+          loads_regulation_state_machine=SET_L1_ON__L2_ON,
+          loads_regulation_period=L1_BOOT_TIME; //            
+          snprintf(event[head_line], LINE_LEN,  "[%s] - (INC) L1_OFF_L2_ON -> SET_L1_ON__L2_ON\r\n", log_time);          
+          break;
+
+// Miner 1 ON, and wait for SSH interface to be ready.
+         case L1_ON__L2_ON:  
+          loads_regulation_state_machine=SET_L1_ST1_L2_ON,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN,  "[%s] - (INC) L1_ON__L2_ON -> SET_L1_ST1_L2_ON\r\n", log_time);          
+          break;
+          
+ // Load 1, 4 steps       
+        case L1_ST1_L2_ON:  // Change to STEP 1 frequency
+          loads_regulation_state_machine=SET_L1_ST2_L2_ON,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN,  "[%s] - (INC) L1_ST1_L2_ON -> SET_L1_ST2_L2_ON\r\n", log_time);          
+          break;
+
+        case L1_ST2_L2_ON:  // Change to STEP 2 frequency
+          loads_regulation_state_machine=SET_L1_ST3_L2_ON,
+          loads_regulation_period=L1_RESET_TIME; //           
+          snprintf(event[head_line], LINE_LEN,  "[%s] - (INC) L1_ST2_L2_ON -> SET_L1_ST3_L2_ON\r\n", log_time);          
+          break;
+
+        case L1_ST3_L2_ON:  // Change to STEP 3 frequency
+          loads_regulation_state_machine=SET_L1_ST4_L2_ON,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN,  "[%s] - (INC) L1_ST3_L2_ON -> SET_L1_ST4_L2_ON\r\n", log_time);          
+          break;
+
+        case L1_ST4_L2_ON:
+          loads_regulation_period=ALL_ONOFF_TIME; //       
+          no_event=1;
+          break;
+        
+        default: no_event=1; break;        
+        }
       }
+
              // Reduce Load.
              //    -1000           -200
       else if(imported_power_avg <= killing_threshold){   
-      
-        loads_regulation_period=REENGAGE_STABILIZATION_TIME;
+
+/*      
+        // loads_regulation_period=REENGAGE_STABILIZATION_TIME;
         
         switch(loads_regulation_state_machine){
         default:
@@ -389,21 +544,24 @@ int main(){
 //          log_time,solar_power,imported_power_avg,killing_threshold,loads_regulation_period);
           no_event=1;
           break;
-        case LOAD_1_OFF_LOAD_2_OFF:
+        case L_1_OFF_L_2_OFF:
+            loads_regulation_period=REENGAGE_STABILIZATION_TIME;
 //          snprintf(event[head_line], LINE_LEN,
 //          "[%s] - Decrease.1OFF/2OFF.solar_power=%d.imported_power_avg=%d>killing_threshold=%d.No action.next loads_regulation_period=%d s\r\n",
 //          log_time,solar_power,imported_power_avg,killing_threshold,loads_regulation_period);
           no_event=1;        
           break; 
-        case LOAD_1_ON_LOAD_2_OFF:
-          loads_regulation_state_machine=KILL_LOAD_1;
+        case L_1_ON_L_2_OFF:
+          loads_regulation_period=REENGAGE_STABILIZATION_TIME;
+          loads_regulation_state_machine=KILL_L_1;
           snprintf(event[head_line], LINE_LEN, 
           "[%s] - Decrease.1ON/2OFF.solar_power=%d.imported_power_avg=%d>killing_threshold=%d.Kill 1.next loads_regulation_period=%d s\r\n",
           log_time,solar_power,imported_power_avg,killing_threshold,loads_regulation_period);
           max_solar_at_load_reduction = solar_power;
           break;
-        case LOAD_1_ON_LOAD_2_ON:
-          loads_regulation_state_machine=KILL_LOAD_2;        
+        case L_1_ON_L_2_ON:
+          loads_regulation_period=REENGAGE_STABILIZATION_TIME;
+          loads_regulation_state_machine=KILL_L_2;        
           snprintf(event[head_line], LINE_LEN,
           "[%s] - Decrease.1ON/2ON.solar_power=%d.imported_power_avg=%d>killing_threshold=%d.Kill 2.next loads_regulation_period=%d s\r\n",
           log_time,solar_power,imported_power_avg,killing_threshold,loads_regulation_period);
@@ -413,7 +571,91 @@ int main(){
       }else{
         no_event =1;
       }// if
-      
+ */
+ 
+         switch(loads_regulation_state_machine){
+        
+// All OFF. 
+        case L1_OFF_L2_OFF:
+          loads_regulation_period=ALL_ONOFF_TIME; //       
+          no_event=1;           
+          break;
+
+// Miner 1 ON, and wait for SSH interface to be ready.
+        case L1_ON__L2_OFF:  
+          loads_regulation_state_machine=SET_L1_OFF_L2_OFF,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN, "[%s] - (DEC) L1_ON__L2_OFF -> SET_L1_OFF_L2_OFF\r\n", log_time);          
+          break;
+ 
+ // Load 1, 4 steps       
+        case L1_ST1_L2_OFF:  // Change to STEP 1 frequency
+          loads_regulation_state_machine=SET_L1_OFF_L2_OFF,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN, "[%s] - (DEC) L1_ST1_L2_OFF -> SET_L1_OFF_L2_OFF\r\n", log_time);          
+          break;
+
+        case L1_ST2_L2_OFF:  // Change to STEP 2 frequency
+          loads_regulation_state_machine=SET_L1_ST1_L2_OFF,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN, "[%s] - (DEC) L1_ST2_L2_OFF -> SET_L1_ST1_L2_OFF\r\n", log_time);         
+          break;
+
+        case L1_ST3_L2_OFF:  // Change to STEP 3 frequency
+          loads_regulation_state_machine=SET_L1_ST2_L2_OFF,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN, "[%s] - (DEC) L1_ST3_L2_OFF -> SET_L1_ST2_L2_OFF\r\n", log_time);          
+          break;
+
+        case L1_ST4_L2_OFF:  // Change to STEP 4 frequency
+          loads_regulation_state_machine=SET_L1_ST3_L2_OFF,
+          loads_regulation_period=L2_BOOT_TIME; //            
+          snprintf(event[head_line], LINE_LEN, "[%s] - (DEC) L1_ST4_L2_OFF -> SET_L1_ST3_L2_OFF\r\n", log_time);          
+          break;
+
+// Miner 1 OFF, Miner 2 ON.
+        case L1_OFF_L2_ON:    
+          loads_regulation_state_machine=SET_L1_ST4_L2_OFF,
+          loads_regulation_period=L1_BOOT_TIME; //            
+          snprintf(event[head_line], LINE_LEN, "[%s] - (DEC) L1_OFF_L2_ON -> SET_L1_ST4_L2_OFF\r\n", log_time);         
+          break;
+
+// Miner 1 ON, and wait for SSH interface to be ready.
+         case L1_ON__L2_ON:  
+          loads_regulation_state_machine=SET_L1_OFF_L2_ON,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN,  "[%s] - (DEC) L1_ON__L2_ON -> SET_L1_OFF_L2_ON\r\n", log_time);          
+          break;
+          
+ // Load 1, 4 steps       
+        case L1_ST1_L2_ON:  // Change to STEP 1 frequency
+          loads_regulation_state_machine=SET_L1_OFF_L2_ON,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN,  "[%s] - (DEC) L1_ST1_L2_ON -> SET_L1_OFF_L2_ON\r\n", log_time);          
+          break;
+
+        case L1_ST2_L2_ON:  // Change to STEP2 frequency
+          loads_regulation_state_machine=SET_L1_ST1_L2_ON,
+          loads_regulation_period=L1_RESET_TIME; //           
+          snprintf(event[head_line], LINE_LEN,  "[%s] - (DEC) L1_ST2_L2_ON -> SET_L1_ST1_L2_ON\r\n", log_time);          
+          break;
+
+        case L1_ST3_L2_ON:  // Change to STEP 3 frequency
+          loads_regulation_state_machine=SET_L1_ST2_L2_ON,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN,  "[%s] - (DEC) L1_ST3_L2_ON -> SET_L1_ST2_L2_ON\r\n", log_time);       
+          break;
+
+        case L1_ST4_L2_ON:
+          loads_regulation_state_machine=SET_L1_ST3_L2_ON,
+          loads_regulation_period=L1_RESET_TIME; //            
+          snprintf(event[head_line], LINE_LEN,  "[%s] - (DEC) L1_ST4_L2_ON -> SET_L1_ST3_L2_ON\r\n", log_time);
+          break;
+        
+        default: no_event=1; break;        
+        }
+      }
+     
       // Write event[] into log_file
       if (!no_event){
         FILE *log_file; log_file=fopen(logfile_name,"a+"); fwrite(event[head_line], 1, strlen(event[head_line]), log_file); fclose(log_file);      
@@ -433,43 +675,44 @@ int main(){
       test=head_line+1; if(test>LOG_LINES){head_line=0; log_full=1;} no_event = 0;
 
       char ifttt_apicall[300]={0};
-              
+
+      /*
       // Regulation outputs
       switch(loads_regulation_state_machine){
                    
-      case ENGAGE_LOAD_1:   
+      case ENGAGE_L_1:   
         snprintf(ifttt_apicall, 300, "curl -X POST "L1_URL_ENGAGE IFTTT_API_KEY);
         //printf(ifttt_apicall); printf("\r\n");
         system(ifttt_apicall);
-        loads_regulation_state_machine = LOAD_1_ON_LOAD_2_OFF;
+        loads_regulation_state_machine = L_1_ON_L_2_OFF;
         snprintf(event[head_line], LINE_LEN, "[%s] - Load 1 engaged\r\n", log_time);          
         load1_engage_counter++;      
         break;
       
-      case ENGAGE_LOAD_2:
+      case ENGAGE_L_2:
         snprintf(ifttt_apicall, 300, "curl -X POST "L2_URL_ENGAGE IFTTT_API_KEY);
         //printf(ifttt_apicall); printf("\r\n");
         system(ifttt_apicall);
-        loads_regulation_state_machine = LOAD_1_ON_LOAD_2_ON;
+        loads_regulation_state_machine = L_1_ON_L_2_ON;
         snprintf(event[head_line], LINE_LEN, "[%s] - Load 2 engaged\r\n", log_time);
         load2_engage_counter++;    
         break;
           
-      case KILL_LOAD_1:
+      case KILL_L_1:
         snprintf(ifttt_apicall, 300, "curl -X POST "L1_URL_KILL IFTTT_API_KEY);
         //printf(ifttt_apicall); printf("\r\n");
         system(ifttt_apicall);
-        loads_regulation_state_machine = LOAD_1_OFF_LOAD_2_OFF;
+        loads_regulation_state_machine = L_1_OFF_L_2_OFF;
         snprintf(event[head_line], LINE_LEN, "[%s] - Load 1 disengaged\r\n", log_time); 
         load1_disengage_counter++;
         miner201_hashrate=0;       
         break;
         
-      case KILL_LOAD_2:
+      case KILL_L_2:
         snprintf(ifttt_apicall, 300, "curl -X POST "L2_URL_KILL IFTTT_API_KEY);
         //printf(ifttt_apicall); printf("\r\n");
         system(ifttt_apicall);        
-        loads_regulation_state_machine = LOAD_1_ON_LOAD_2_OFF;
+        loads_regulation_state_machine = L_1_ON_L_2_OFF;
         snprintf(event[head_line], LINE_LEN, "[%s] - Load 2 disengaged\r\n", log_time);
         load2_disengage_counter++;
         miner202_hashrate=0;
@@ -479,20 +722,127 @@ int main(){
         no_event = 1;
         break;
       
-      case KILL_ALL_LOADS:
+      case KILL_ALL_LS:
         snprintf(ifttt_apicall, 300, "curl -X POST "L1_URL_KILL IFTTT_API_KEY);
         printf(ifttt_apicall); printf("\r\n");         
         system(ifttt_apicall);
         snprintf(ifttt_apicall, 300, "curl -X POST "L2_URL_KILL IFTTT_API_KEY);
         printf(ifttt_apicall); printf("\r\n");         
         system(ifttt_apicall);
-        loads_regulation_state_machine=LOAD_1_OFF_LOAD_2_OFF;
+        loads_regulation_state_machine=L_1_OFF_L_2_OFF;
         snprintf(event[head_line], LINE_LEN, "[%s] - Load 1 & 2 disengaged\r\n", log_time);  
         miner201_hashrate = 0;
         miner202_hashrate = 0;      
         break;
-      }// switch    
+      }// switch
+      */
+
+      // Regulation outputs
+      switch(loads_regulation_state_machine){
       
+      case SET_L1_OFF_L2_OFF:
+        snprintf(ifttt_apicall, 300, L1_ST1_SYS);                               system(ifttt_apicall);  // Before killing L1, preset ST1.
+        snprintf(ifttt_apicall, 300, L1_RES_SYS);                               system(ifttt_apicall);                      
+        snprintf(ifttt_apicall, 300, "curl -X POST "L1_OFF_URL IFTTT_API_KEY);  system(ifttt_apicall); miner201_hashrate = 0;
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_OFF_URL IFTTT_API_KEY);  system(ifttt_apicall); miner202_hashrate = 0;
+        loads_regulation_state_machine=L1_OFF_L2_OFF;
+        snprintf(event[head_line], LINE_LEN, "[%s] - L1_OFF_L2_OFF Set\r\n", log_time);              
+        break;
+                   
+      case SET_L1_ON__L2_OFF:   
+        snprintf(ifttt_apicall, 300, "curl -X POST "L1_ON_URL IFTTT_API_KEY);   system(ifttt_apicall); 
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_OFF_URL IFTTT_API_KEY);  system(ifttt_apicall);
+        loads_regulation_state_machine=L1_ON__L2_OFF;
+        snprintf(event[head_line], LINE_LEN, "[%s] - L1_ON__L2_OFF Set\r\n", log_time);      
+        break;
+
+      case SET_L1_ST1_L2_OFF:
+        snprintf(ifttt_apicall, 300, L1_ST1_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, L1_RES_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_OFF_URL IFTTT_API_KEY);  system(ifttt_apicall);
+        loads_regulation_state_machine=L1_ST1_L2_OFF;
+        snprintf(event[head_line], LINE_LEN, "[%s] - L1_ST1_L2_OFF Set\r\n", log_time);  
+        break;
+
+      case SET_L1_ST2_L2_OFF:
+        snprintf(ifttt_apicall, 300, L1_ST2_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, L1_RES_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_OFF_URL IFTTT_API_KEY);  system(ifttt_apicall);
+        loads_regulation_state_machine=L1_ST2_L2_OFF;
+        snprintf(event[head_line], LINE_LEN, "[%s] - L1_ST2_L2_OFF Set\r\n", log_time);  
+        break;
+        
+      case SET_L1_ST3_L2_OFF:
+        snprintf(ifttt_apicall, 300, L1_ST3_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, L1_RES_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_OFF_URL IFTTT_API_KEY);  system(ifttt_apicall);
+        snprintf(event[head_line], LINE_LEN, "[%s] - L1_ST3_L2_OFF Set\r\n", log_time);  
+        loads_regulation_state_machine=L1_ST3_L2_OFF;
+        break;
+
+      case SET_L1_ST4_L2_OFF:
+        snprintf(ifttt_apicall, 300, L1_ST4_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, L1_RES_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_OFF_URL IFTTT_API_KEY);  system(ifttt_apicall);
+        snprintf(event[head_line], LINE_LEN, "[%s] - L1_ST4_L2_OFF Set\r\n", log_time);
+        loads_regulation_state_machine=L1_ST4_L2_OFF;
+        break;
+        
+      case SET_L1_OFF_L2_ON:
+        snprintf(ifttt_apicall, 300, L1_ST1_SYS);                               system(ifttt_apicall);  // Before killing L1, preset ST1.
+        snprintf(ifttt_apicall, 300, L1_RES_SYS);                               system(ifttt_apicall);                
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_ON_URL IFTTT_API_KEY);   system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L1_OFF_URL IFTTT_API_KEY);  system(ifttt_apicall);        
+        snprintf(event[head_line], LINE_LEN, "[%s] - L1_OFF_L2_ON Set\r\n", log_time);     
+        loads_regulation_state_machine=L1_OFF_L2_ON; 
+        break;
+
+
+      case SET_L1_ON__L2_ON:
+        snprintf(ifttt_apicall, 300, "curl -X POST "L1_ON_URL IFTTT_API_KEY);   system(ifttt_apicall); 
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_ON_URL IFTTT_API_KEY);   system(ifttt_apicall);
+        snprintf(event[head_line], LINE_LEN, "[%s] - L1_ON__L2_ON Set\r\n", log_time);     
+        loads_regulation_state_machine=L1_ON__L2_ON;  
+        break;
+        
+      case SET_L1_ST1_L2_ON:
+        snprintf(ifttt_apicall, 300, L1_ST1_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, L1_RES_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_ON_URL IFTTT_API_KEY);   system(ifttt_apicall);
+        snprintf(event[head_line], LINE_LEN, "[%s] - L1_ST1_L2_ON Set\r\n", log_time);
+        loads_regulation_state_machine=L1_ST1_L2_ON;
+        break;
+
+      case SET_L1_ST2_L2_ON:
+        snprintf(ifttt_apicall, 300, L1_ST2_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, L1_RES_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_ON_URL IFTTT_API_KEY);   system(ifttt_apicall);
+        snprintf(event[head_line], LINE_LEN, "[%s] - L1_ST2_L2_ON\r\n", log_time);
+        loads_regulation_state_machine=L1_ST2_L2_ON;
+        break;
+
+      case SET_L1_ST3_L2_ON:
+        snprintf(ifttt_apicall, 300, L1_ST3_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, L1_RES_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_ON_URL IFTTT_API_KEY);   system(ifttt_apicall);
+        snprintf(event[head_line], LINE_LEN, "[%s] - L1_ST3_L2_ON Set\r\n", log_time);
+        loads_regulation_state_machine=L1_ST3_L2_ON;
+        break;
+
+      case SET_L1_ST4_L2_ON:
+        snprintf(ifttt_apicall, 300, L1_ST4_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, L1_RES_SYS);                               system(ifttt_apicall);
+        snprintf(ifttt_apicall, 300, "curl -X POST "L2_ON_URL IFTTT_API_KEY);   system(ifttt_apicall);
+        snprintf(event[head_line], LINE_LEN, "[%s] - L1_ST4_L2_ON Set\r\n", log_time);
+        loads_regulation_state_machine=L1_ST4_L2_ON;
+        break;
+
+  
+      default:
+        no_event = 1;
+        break;
+      }// switch
+         
       if (!no_event){
         FILE *log_file; log_file=fopen(logfile_name,"a+"); fwrite(event[head_line], 1, strlen(event[head_line]), log_file); fclose(log_file);      
         head_line++; 
@@ -544,7 +894,7 @@ int main(){
       printf("W) ->-\\\r\n"); 
       printf("PV2 (V="); if (pv2_voltage > MIN_PV_VOLTAGE) printf(COLOR_GREEN "%03d" COLOR_RESET, pv2_voltage);
                          else                              printf(COLOR_RED "%03d" COLOR_RESET, pv2_voltage);
-      printf(         ",I=%2.1f)->-/         Today ( %03.1f KWh)     |\r\n", pv2_current, today_solar_kwh);
+      printf(         ",I=%2.1f)->-/ Today/Total(%03.2f/%03.2f KWh)|\r\n", pv2_current, solar_kwh_today, solar_kwh_total);
       printf("                                                   |\r\n");
       printf("Imported power (");
       if     ( imported_power_avg > 0 )                    printf(COLOR_MAGENTA"%05d W)  --<----<----<----<----<--|\r\n" COLOR_RESET, imported_power_avg);
@@ -595,14 +945,14 @@ int main(){
       printf("Loads regulation State machine:");
       switch(loads_regulation_state_machine){
       case DEFAULT:               printf("[DEFAULT"); break;
-      case KILL_ALL_LOADS:        printf("[KILL_ALL_LOADS"); break;
-      case ENGAGE_LOAD_1:         printf("[ENGAGE_LOAD_1"); break;                           
-      case ENGAGE_LOAD_2:         printf("[ENGAGE_LOAD_2"); break;
-      case KILL_LOAD_1:           printf("[KILL_LOAD_1"); break;
-      case KILL_LOAD_2:           printf("[KILL_LOAD_2"); break;                                 
-      case LOAD_1_OFF_LOAD_2_OFF: printf("[LOAD_1="); printf(COLOR_RED "OFF" COLOR_RESET); printf(" | LOAD_2="); printf(COLOR_RED "OFF" COLOR_RESET); break;
-      case LOAD_1_ON_LOAD_2_OFF:  printf("[LOAD_1="); printf(COLOR_GREEN "ON" COLOR_RESET); printf(" | LOAD_2="); printf(COLOR_RED "OFF" COLOR_RESET); break;
-      case LOAD_1_ON_LOAD_2_ON:   printf("[LOAD_1="); printf(COLOR_GREEN "ON" COLOR_RESET); printf(" | LOAD_2="); printf(COLOR_GREEN "ON" COLOR_RESET); break;
+      case KILL_ALL_LS:        printf("[KILL_ALL_LS"); break;
+      case ENGAGE_L_1:         printf("[ENGAGE_L_1"); break;                           
+      case ENGAGE_L_2:         printf("[ENGAGE_L_2"); break;
+      case KILL_L_1:           printf("[KILL_L_1"); break;
+      case KILL_L_2:           printf("[KILL_L_2"); break;                                 
+      case L_1_OFF_L_2_OFF: printf("[L_1="); printf(COLOR_RED "OFF" COLOR_RESET); printf(" | L_2="); printf(COLOR_RED "OFF" COLOR_RESET); break;
+      case L_1_ON_L_2_OFF:  printf("[L_1="); printf(COLOR_GREEN "ON" COLOR_RESET); printf(" | L_2="); printf(COLOR_RED "OFF" COLOR_RESET); break;
+      case L_1_ON_L_2_ON:   printf("[L_1="); printf(COLOR_GREEN "ON" COLOR_RESET); printf(" | L_2="); printf(COLOR_GREEN "ON" COLOR_RESET); break;
       }
       printf("]\r\n");     
 */
