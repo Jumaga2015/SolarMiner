@@ -400,7 +400,8 @@ int main(){
       loads_regulation_timer=time(NULL);
       
       time(&t); info=localtime(&t); strftime(log_time,25,"%Y/%m/%d-%H:%M:%S", info); 
-      test=head_line+1; if(test>LOG_LINES){head_line=0; log_full=1;} no_event=0;
+      test=head_line+1; if(test>LOG_LINES){head_line=0; log_full=1;} 
+      no_event=0;
       
       /*            
       // Increase Load
@@ -526,7 +527,9 @@ int main(){
           no_event=1;
           break;
         
-        default: no_event=1; break;        
+        default: 
+          no_event=1; 
+          break;        
         }
       }
 
@@ -567,11 +570,8 @@ int main(){
           log_time,solar_power,imported_power_avg,killing_threshold,loads_regulation_period);
           max_solar_at_load_reduction = solar_power;
           break;      
-        }//case                 
-      }else{
-        no_event =1;
-      }// if
- */
+        }//case  
+*/               
  
          switch(loads_regulation_state_machine){
         
@@ -652,9 +652,13 @@ int main(){
           snprintf(event[head_line], LINE_LEN,  "[%s] - (DEC) L1_ST4_L2_ON -> SET_L1_ST3_L2_ON\r\n", log_time);
           break;
         
-        default: no_event=1; break;        
+        default: 
+          no_event=1; 
+          break;        
         }
-      }
+      }else{
+        no_event =1;
+      }// if
      
       // Write event[] into log_file
       if (!no_event){
